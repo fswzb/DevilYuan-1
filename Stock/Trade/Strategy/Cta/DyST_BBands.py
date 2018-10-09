@@ -12,29 +12,21 @@ class DyST_BBands(DyStockCtaTemplate):
 
     backTestingMode = 'bar1d'
 
-    broker = 'simu3'
+    broker = 'simu4'
 
     curCodeBuyMaxNbr = 1
 
     # 策略实盘参数
-    walkMa = 20 # 游走均线
-    closeWalkMaPeriod = 30 # 前30日内，50%的收盘价在@walkMa之上
-    closeUpWalkMaRatio = 50
-    closeUpWalkMaNDays = 10 # 前10日，收盘价在@walkMa之上
-
+    param = OrderedDict\
+                ([
+                    ('周期', '22')
+                ])
+    
     longMas = [20, 30, 60] # 均线多头排列
     prepareDaysSize = 10 # 需要准备的日线数据的天数
 
-    volatilityNDays = 30 # 多少日的波动率
-    volatilityThreshold = 6 # 波动率阈值
-
-    swingNDays = 30 # swing的天数
-    swingWindowSize = 3 # 计算swing用的滑动窗口大小
-
-    erThreshold = 0.4 # @closeWalkMaPeriod日内的效率系数阈值
-
-    #------------ 卖出信号相关参数 ------------
-    sellSignalStopTimeThreshold = 4
+    # 实盘参数
+    bbPeriod = 22
     
 
     # UI
@@ -43,16 +35,17 @@ class DyST_BBands(DyStockCtaTemplate):
                   '名称',
                   '现价',
                   '涨幅(%)',
-                  '最高涨幅(%)',
-
-                  '现价{}均线差值比(%)'.format(walkMa),
-                  '最低价{}均线差值比(%)'.format(walkMa),
-                  '前{}日收盘在{}均线之上比(%)'.format(closeWalkMaPeriod, walkMa)
+                  '最高涨幅(%)'
                   ]
 
 
     def __init__(self, ctaEngine, info, state, strategyParam=None):
         super().__init__(ctaEngine, info, state, strategyParam)
+
+        if strategyParam is None: # 实盘参数
+            pass
+        else: # 回测参数
+            self._bbPeriod = self._strategyParam['周期']
 
         self._curInit()
 
@@ -66,7 +59,6 @@ class DyST_BBands(DyStockCtaTemplate):
     def onOpen(self, date, codes=None):
         # 当日初始化
         self._curInit(date)
-
         self._onOpenConfig()
 
         return True
@@ -87,7 +79,7 @@ class DyST_BBands(DyStockCtaTemplate):
             处理准备数据除复权
             @preClose: 数据库里的前一日收盘价，由装饰器传入。具体策略无需关注。
         """
-        self.processDataAdj(tick, preClose, self._preparedData, ['walkMa'])
+        #print('in _processPreparedDataAdj() -- tick = ', tick)
         self.processOhlcvDataAdj(tick, preClose, self._preparedData, 'days')
 
     @DyStockCtaTemplate.processPreparedPosDataAdjWrapper
@@ -96,29 +88,11 @@ class DyST_BBands(DyStockCtaTemplate):
             处理准备数据除复权
             @preClose: 数据库里的前一日收盘价，由装饰器传入。具体策略无需关注。
         """
-        self.processDataAdj(tick, preClose, self._preparedPosData, ['ma10', 'atr'], keyCodeFormat=False)
+        self.processDataAdj(tick, preClose, self._preparedPosData, ['upper', 'middle', 'lower'], keyCodeFormat=False)
 
     def _processAdj(self, tick):
         """ 处理除复权 """
         return self._processPreparedDataAdj(tick) and self._processPreparedPosDataAdj(tick)
-
-    def _addCodeMarketData(self, tick):
-        ma = self._preparedData['walkMa'].get(tick.code)
-        ratio = self._preparedData['closeUpWalkMaRatio'].get(tick.code)
-        if ma is None or ratio is None:
-            return
-
-        data = [tick.code,
-                tick.name,
-                tick.price,
-                (tick.price - tick.preClose)/tick.preClose*100,
-                (tick.high - tick.preClose)/tick.preClose*100,
-                (tick.price - ma)/ma*100,
-                (tick.low - ma)/ma*100,
-                ratio
-                ]
-
-        self._marketData.append(data)
 
     def _calcBuySignal(self, ticks):
         """
@@ -130,39 +104,34 @@ class DyST_BBands(DyStockCtaTemplate):
 
         count = 0
         for code, tick in ticks.items():
+            #print('in _calcBuySignal() -- code, tick = ', code, tick)
             if tick.time < '14:55:00':
-                continue
-
-            walkMa = self._preparedData['walkMa'].get(code)
-            if walkMa is None:
                 continue
 
             if tick.volume > self._preparedData['days'][code][-1][-1]:
                 continue
 
-            """
-            # 波动率
-            swingBottomVolatilityMean = self._preparedData['swingBottomVolatilityMean'].get(code)
-            if swingBottomVolatilityMean is None:
+            ## 当日价格穿价游走均线
+            #if tick.low <= walkMa and tick.price > walkMa:
+            #    buyCodes[code] = (tick.low - walkMa)/walkMa
+
+            #elif tick.high > tick.low:
+            #    buyCodes1[code] = (min(tick.open, tick.price) - tick.low)/(tick.high - tick.low)
+            if self._preparedPosData.get(code): #preparedData['bbandsData']
+                upper = self._preparedPosData[code]['upper']
+                middle = self._preparedPosData[code]['middle']
+                lower = self._preparedPosData[code]['lower']
+                #if upper[-1] > upper[-2] and upper[-2] > upper[-3] \
+                #    and middle[-1] > middle[-2] and middle[-2] > middle[-3] \
+                #    and lower[-1] > lower[-2] and lower[-2] > lower[-3] \
+                #    and tick.close > middle[-1]:
+                if upper[-1] > upper[-2] and upper[-2] > upper[-3] \
+                    and middle[-1] > middle[-2]:
+                    buyCodes[code] = tick.close
+            else:
+                #info.print('股票{}不存在于_preparedPosData中。_preparedPosData的长度为{}'.format(code, len(self._preparedData) ), DyLogData.ind)
+                #print('股票{}不存在于_preparedPosData中。_preparedPosData的长度为{}'.format(code, len(self._preparedData) ) )
                 continue
-
-            # 当日波动率
-            volatiliy = max(abs(tick.high - tick.low),
-                            abs(tick.high - tick.preClose),
-                            abs(tick.low - tick.preClose)
-                            )
-            volatiliy = volatiliy/tick.preClose*100
-
-            if volatiliy > swingBottomVolatilityMean:
-                continue
-            """
-
-            # 当日价格穿价游走均线
-            if tick.low <= walkMa and tick.price > walkMa:
-                buyCodes[code] = (tick.low - walkMa)/walkMa
-
-            elif tick.high > tick.low:
-                buyCodes1[code] = (min(tick.open, tick.price) - tick.low)/(tick.high - tick.low)
 
         buyCodes = sorted(buyCodes, key=lambda k: buyCodes[k], reverse=True)
         buyCodes1 = sorted(buyCodes1, key=lambda k: buyCodes1[k], reverse=True)
@@ -194,6 +163,11 @@ class DyST_BBands(DyStockCtaTemplate):
                 continue
 
             if pos.holdingPeriod > 5 and pnlRatio > 5:
+                sellCodes.append(code)
+                continue
+
+            if upper[-1] < upper[-2] and middle[-1] < middle[-2] and lower[-1] < lower[-2] \
+                or bar.close < middle[-1]:
                 sellCodes.append(code)
                 continue
 
@@ -269,8 +243,6 @@ class DyST_BBands(DyStockCtaTemplate):
             if not self._processAdj(tick):
                 continue
 
-            self._addCodeMarketData(tick)
-
         # 处理信号
         self._procSignal(ticks)
 
@@ -284,39 +256,18 @@ class DyST_BBands(DyStockCtaTemplate):
 
     #################### 开盘前的数据准备 ####################
     @classmethod
-    def _isMasLong(cls, maDf):
-        """
-            是不是均线多头排列
-        """
-        preMaDiff = None
-        for i in range(len(DyST_MaWalk.longMas) - 1):
-            ma = maDf.ix[-1, 'ma%s'%DyST_MaWalk.longMas[i]]
-            nextMa = maDf.ix[-1, 'ma%s'%DyST_MaWalk.longMas[i+1]]
-
-            if ma < nextMa:
-                return False
-
-            maDiff = ma - nextMa
-            if preMaDiff is not None:
-                if preMaDiff > maDiff:
-                    return False
-
-            preMaDiff = maDiff
-
-        return True
-
-    @classmethod
     def prepare(cls, date, dataEngine, info, codes=None, errorDataEngine=None, strategyParam=None, isBackTesting=False):
         """
             @date: 回测或者实盘时，此@date为前一交易日
             @return: {'preClose': {code: preClose},
-                      'walkMa': {code: ma},
-                      'closeUpWalkMaRatio': {code: ratio%},
-                      'days': {code: [[OHLCV]]},
-                      'er': {code: er},
-                      'swingBottomVolatilityMean': {code: mean of swing bottom volatility}
+                      'days': {code: [[OHLCV]]}
                      }
         """
+        if isBackTesting:
+            bbPeriod = strategyParam['周期']
+        else:
+            bbPeriod = cls.bbPeriod
+
         daysEngine = dataEngine.daysEngine
         errorDaysEngine = errorDataEngine.daysEngine
 
@@ -328,17 +279,16 @@ class DyST_BBands(DyStockCtaTemplate):
         progress = DyProgress(info)
         progress.init(len(codes), 100, 10)
 
-        maxPeriod = max(DyST_MaWalk.longMas[-1], DyST_MaWalk.closeWalkMaPeriod + DyST_MaWalk.walkMa)
+        maxPeriod = max(DyST_BBands.longMas[-1], DyST_BBands.bbPeriod)
 
         preparedData = {}
         preCloseData = {}
-        walkMaData = {}
-        closeUpWalkMaRatioData = {}
         daysData = {}
-        swingBottomVolatilityMeanData = {}
-        erData = {}
+        bbandsData = {}
+        print('in prepare() -- codes({})'.format(len(codes) ) )
+        print(date)
         for code in codes:
-            if not errorDaysEngine.loadCode(code, [date, -maxPeriod + 1], latestAdjFactorInDb=False):
+            if not errorDaysEngine.loadCode(code, [date, -200], latestAdjFactorInDb=False):
                 progress.update()
                 continue
 
@@ -348,102 +298,29 @@ class DyST_BBands(DyStockCtaTemplate):
                 progress.update()
                 continue
 
-            # MAs
-            mas = set([DyST_MaWalk.walkMa] + DyST_MaWalk.longMas)
-            maDf = DyStockDataUtility.getMas(df, mas, dropna=False)
-
-            # 均线多头排列
-            if not DyST_MaWalk._isMasLong(maDf):
-                progress.update()
-                continue
-
-            # 收盘价游走均线占比
-            walkMas = maDf['ma%s'%DyST_MaWalk.walkMa][-DyST_MaWalk.closeWalkMaPeriod:].values
-            closes = df['close'][-DyST_MaWalk.closeWalkMaPeriod:].values
-
-            ratio = (closes > walkMas).sum()/len(closes)*100
-            if ratio < DyST_MaWalk.closeUpWalkMaRatio:
-                progress.update()
-                continue
-
-            # 收盘价和游走均线价差
             close = df['close'][-1]
-            walkMa = maDf['ma%s'%DyST_MaWalk.walkMa][-1]
-
-            if not (0 < (close - walkMa)/close < 0.1):
-                progress.update()
-                continue
-
-            # 收盘价游走均线之上日数
-            walkMas = maDf['ma%s'%DyST_MaWalk.walkMa][-DyST_MaWalk.closeUpWalkMaNDays:].values
-            closes = df['close'][-DyST_MaWalk.closeUpWalkMaNDays:].values
-
-            if (closes < walkMas).sum() > 0:
-                progress.update()
-                continue
-
-            # 无跌停
-            if (df['close'][-DyST_MaWalk.closeUpWalkMaNDays-1:].pct_change().dropna() <= DyStockCommon.limitDownPct/100).sum() > 0:
-                progress.update()
-                continue
-
-            # 无涨停
-            if (df['close'][-DyST_MaWalk.closeUpWalkMaNDays-1:].pct_change().dropna() >= DyStockCommon.limitUpPct/100).sum() > 0:
-                progress.update()
-                continue
-
-            # Efficiency ratio
-            closes = df['close'][-DyST_MaWalk.closeWalkMaPeriod:]
-            direction = closes[-1] - closes[0]
-            volatility = (closes - closes.shift(1)).abs().sum()
-            er = direction/volatility
-            if er < DyST_MaWalk.erThreshold:
-                progress.update()
-                continue
-
-            # 波动率
-            volatilityMean = DyStockDataUtility.getVolatility(df[-DyST_MaWalk.volatilityNDays-1:]).mean()
-            if volatilityMean > DyST_MaWalk.volatilityThreshold:
-                progress.update()
-                continue
-
-            # 最近3天波动率
-            volatility = DyStockDataUtility.getVolatility(df[-4:])
-            if not 10 > volatility.mean() > 2:
-                progress.update()
-                continue
-
-            if volatility.max() > 10:
-                progress.update()
-                continue
-
-            # Swing波动率
-            if 0:
-                volatility = DyStockDataUtility.getVolatility(df[-DyST_MaWalk.swingNDays-1:])
-                extremas, peaks, bottoms = DyStockDataUtility.swings(df[-DyST_MaWalk.swingNDays-1:], w=DyST_MaWalk.swingWindowSize)
-                bottoms = bottoms[bottoms <= DyST_MaWalk.volatilityThreshold] # 剔除底部大波动的点
-                if bottoms.empty:
-                    continue
-
-                swingBottomVolatilityMean = volatility[bottoms.index].mean()
-                print(code, swingBottomVolatilityMean)
-
             #-------------------- set prepared data for each code --------------------
             preCloseData[code] = close # preClose
-            walkMaData[code] = walkMa # walk ma
-            closeUpWalkMaRatioData[code] = ratio # 收盘价游走均线占比
-            daysData[code] = df.ix[-DyST_MaWalk.prepareDaysSize:, ['open', 'high', 'low', 'close', 'volume']].values.tolist() # 日线OHLCV
-            #swingBottomVolatilityMeanData[code] = swingBottomVolatilityMean
-            erData[code] = er
+            daysData[code] = df.ix[-DyST_BBands.prepareDaysSize:, ['open', 'high', 'low', 'close', 'volume']].values.tolist() # 日线OHLCV
+
+            # calc the bbands
+            #print(code)
+            upper, middle, lower = DyST_BBands._bbands(df)
+            #print(upper, middle, lower)
+            if middle is None: return
+
+            bbandsData[code] = {'preClose': close, # 为了除复权
+                          'upper': upper,
+                          'middle': middle,
+                          'lower': lower
+                          }
 
             progress.update()
 
         preparedData['preClose'] = preCloseData
-        preparedData['walkMa'] = walkMaData
-        preparedData['closeUpWalkMaRatio'] = closeUpWalkMaRatioData
         preparedData['days'] = daysData
-        preparedData['er'] = erData
-        preparedData['swingBottomVolatilityMean'] = swingBottomVolatilityMeanData
+        preparedData['bbandsData'] = bbandsData
+        print('in prepare() -- bbandsData({})'.format(len(bbandsData) ) )
 
         info.print('计算{}只股票的指标完成, 共选出{}只股票'.format(len(codes), len(preCloseData)), DyLogData.ind)
 
@@ -462,6 +339,7 @@ class DyST_BBands(DyStockCtaTemplate):
         errorDaysEngine = errorDataEngine.daysEngine
 
         data = {}
+        print('in preparePos() -- posCodes({})'.format(len(posCodes) ) )
         for code in posCodes:
             if not errorDaysEngine.loadCode(code, [date, -200], latestAdjFactorInDb=False):
                 return None
@@ -470,12 +348,42 @@ class DyST_BBands(DyStockCtaTemplate):
 
             highs, lows, closes = df['high'].values, df['low'].values, df['close'].values
 
-            # channel upper and lower
-            atr = DyTalib.ATR(highs, lows, closes, timeperiod=DyST_MaWalk.walkMa)
+            # calc the bbands
+            upper, middle, lower = DyST_BBands._bbands(df)
+            if middle is None: return
 
             data[code] = {'preClose': closes[-1], # 为了除复权
-                          'ma10': df['close'][-10:].mean(),
-                          'atr': atr
+                          'upper': upper,
+                          'middle': middle,
+                          'lower': lower
                           }
 
         return data
+
+    @classmethod
+    def _bbands(cls, df):
+        try:
+            #close = df['close']
+            close = df['close']
+        except Exception as ex:
+            print(ex)
+            return None, None, None
+
+        #if close.shape[0] != DyST_BBands.bbPeriod:
+        #    print(ex)
+        #    return None, None, None
+
+        try:
+            upper, middle, lower = talib.BBANDS(
+                                close.values, 
+                                timeperiod=DyST_BBands.bbPeriod,
+                                # number of non-biased standard deviations from the mean
+                                nbdevup=1,
+                                nbdevdn=1,
+                                # Moving average type: simple moving average here
+                                matype=0)
+        except Exception as ex:
+            print(ex)
+            return None, None, None
+
+        return upper, middle, lower
