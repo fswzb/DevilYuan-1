@@ -19,14 +19,14 @@ class DyST_BBands(DyStockCtaTemplate):
     # 策略实盘参数
     param = OrderedDict\
                 ([
-                    ('周期', '22')
+                    ('周期', '44')
                 ])
     
     longMas = [20, 30, 60] # 均线多头排列
-    prepareDaysSize = 10 # 需要准备的日线数据的天数
+    prepareDaysSize = 250 # 需要准备的日线数据的天数
 
     # 实盘参数
-    bbPeriod = 22
+    bbPeriod = 44
     
 
     # UI
@@ -117,20 +117,28 @@ class DyST_BBands(DyStockCtaTemplate):
 
             #elif tick.high > tick.low:
             #    buyCodes1[code] = (min(tick.open, tick.price) - tick.low)/(tick.high - tick.low)
-            if self._preparedPosData.get(code): #preparedData['bbandsData']
-                upper = self._preparedPosData[code]['upper']
-                middle = self._preparedPosData[code]['middle']
-                lower = self._preparedPosData[code]['lower']
+            # print('in _calcBuySignal() -- 0')
+            if self._preparedData['bbandsData'].get(code): #preparedData['bbandsData']
+                # print('in _calcBuySignal() -- 1')
+                
+                upper = self._preparedData['bbandsData'][code]['upper']
+                middle = self._preparedData['bbandsData'][code]['middle']
+                lower = self._preparedData['bbandsData'][code]['lower']
+                # print(upper)
                 #if upper[-1] > upper[-2] and upper[-2] > upper[-3] \
                 #    and middle[-1] > middle[-2] and middle[-2] > middle[-3] \
                 #    and lower[-1] > lower[-2] and lower[-2] > lower[-3] \
                 #    and tick.close > middle[-1]:
                 if upper[-1] > upper[-2] and upper[-2] > upper[-3] \
-                    and middle[-1] > middle[-2]:
+                   and middle[-1] > middle[-2] and middle[-2] > middle[-3] \
+                   and lower[-1] > lower[-2] and lower[-2] > lower[-3] \
+                   and tick.close > middle[-1]:
                     buyCodes[code] = tick.close
+                    # print('in _calcBuySignal() -- 2, code = ', code)
             else:
                 #info.print('股票{}不存在于_preparedPosData中。_preparedPosData的长度为{}'.format(code, len(self._preparedData) ), DyLogData.ind)
                 #print('股票{}不存在于_preparedPosData中。_preparedPosData的长度为{}'.format(code, len(self._preparedData) ) )
+                # print('in _calcBuySignal() -- 3')
                 continue
 
         buyCodes = sorted(buyCodes, key=lambda k: buyCodes[k], reverse=True)
@@ -166,8 +174,17 @@ class DyST_BBands(DyStockCtaTemplate):
                 sellCodes.append(code)
                 continue
 
-            if upper[-1] < upper[-2] and middle[-1] < middle[-2] and lower[-1] < lower[-2] \
-                or bar.close < middle[-1]:
+            upper = self._preparedData['bbandsData'][code]['upper']
+            middle = self._preparedData['bbandsData'][code]['middle']
+            lower = self._preparedData['bbandsData'][code]['lower']
+            # if upper[-1] < upper[-2] \
+            #     and middle[-1] < middle[-2] \
+            #     and lower[-1] < lower[-2] \
+            #     or tick.close < middle[-1]:
+            if upper[-1] < upper[-2] \
+                and middle[-1] < middle[-2] \
+                and lower[-1] < lower[-2] \
+                or tick.close < middle[-1]:
                 sellCodes.append(code)
                 continue
 
@@ -376,7 +393,8 @@ class DyST_BBands(DyStockCtaTemplate):
         try:
             upper, middle, lower = talib.BBANDS(
                                 close.values, 
-                                timeperiod=DyST_BBands.bbPeriod,
+                                # timeperiod=DyST_BBands.bbPeriod,
+                                timeperiod=22,
                                 # number of non-biased standard deviations from the mean
                                 nbdevup=1,
                                 nbdevdn=1,
